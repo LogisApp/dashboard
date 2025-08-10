@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Centros de Costo Unix - O28</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.20.0.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #f8fafc;
+            --bg-secondary: #ffffff;
+            --text-primary: #1e293b;
+            --text-secondary: #64748b;
+            --border-color: #e2e8f0;
+            --accent-color: #3b82f6;
+            --accent-hover: #2563eb;
+            --kpi-delta-positive: #10b981;
+            --kpi-delta-negative: #ef4444;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+        }
+        .sidebar {
+            transition: transform 0.3s ease-in-out;
+        }
+        .card {
+            background-color: var(--bg-secondary);
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 4px solid var(--accent-color);
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* Custom scrollbar for multiselect */
+        .filter-multiselect {
+            min-height: 120px;
+            border: none;
+            box-shadow: none;
+            outline: none;
+        }
+        .filter-multiselect::-webkit-scrollbar {
+            width: 8px;
+        }
+        .filter-multiselect::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+        .filter-multiselect::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 10px;
+        }
+        .filter-multiselect::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+        /* Collapsible Filter Styles */
+        .filter-details {
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+            transition: background-color 0.2s;
+        }
+        .filter-details[open] {
+            background-color: #f7faff;
+        }
+        .filter-summary {
+            padding: 0.75rem 1rem;
+            cursor: pointer;
+            list-style: none; /* Remove default marker */
+            font-weight: 500;
+            color: var(--text-primary);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .filter-summary::-webkit-details-marker {
+            display: none; /* Hide default marker for Chrome */
+        }
+        .filter-summary::after { /* Custom marker */
+            content: '▼';
+            font-size: 0.7em;
+            color: var(--text-secondary);
+            transition: transform 0.2s;
+        }
+        .filter-details[open] > .filter-summary::after {
+            transform: rotate(180deg);
+        }
+        /* Range Slider Styles */
+        input[type=range] {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            height: 6px;
+            background: var(--border-color);
+            border-radius: 5px;
+            outline: none;
+            opacity: 0.7;
+            transition: opacity .2s;
+        }
+        input[type=range]:hover {
+            opacity: 1;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 18px;
+            height: 18px;
+            background: var(--accent-color);
+            cursor: pointer;
+            border-radius: 50%;
+            border: 2px solid var(--bg-secondary);
+        }
+        input[type=range]::-moz-range-thumb {
+            width: 18px;
+            height: 18px;
+            background: var(--accent-color);
+            cursor: pointer;
+            border-radius: 50%;
+            border: 2px solid var(--bg-secondary);
+        }
+    </style>
+</head>
+<body class="text-gray-800">
+    <button id="desktop-sidebar-toggle" class="hidden lg:block fixed top-1/2 -translate-y-1/2 left-80 z-50 bg-white p-2 rounded-full shadow-md transition-all duration-300 ease-in-out">
+        <svg id="desktop-sidebar-toggle-icon" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+    </button>
+
+    <div class="relative min-h-screen lg:flex">
+        <!-- Sidebar -->
+        <aside id="sidebar" class="bg-white w-80 min-h-screen p-6 fixed inset-y-0 left-0 transform -translate-x-full lg:relative lg:translate-x-0 z-30 sidebar">
+            <h2 class="text-2xl font-bold mb-8 text-gray-900">Filtros</h2>
+            <div id="filters-container" class="space-y-4">
+                <details class="filter-details">
+                    <summary class="filter-summary">Centro</summary>
+                    <select id="filter-centro" multiple class="w-full border-t border-gray-200 filter-multiselect"></select>
+                </details>
+                <details class="filter-details">
+                    <summary class="filter-summary">Cuenta (cta)</summary>
+                    <select id="filter-cta" multiple class="w-full border-t border-gray-200 filter-multiselect"></select>
+                </details>
+                <details class="filter-details">
+                    <summary class="filter-summary">Descripción</summary>
+                    <select id="filter-desc" multiple class="w-full border-t border-gray-200 filter-multiselect"></select>
+                </details>
+                <details class="filter-details">
+                    <summary class="filter-summary">Proveedor</summary>
+                    <select id="filter-prov" multiple class="w-full border-t border-gray-200 filter-multiselect"></select>
+                </details>
+
+                <div id="year-filter-container" class="pt-4">
+                    <label class="font-semibold text-sm text-gray-800">Rango de Años</label>
+                    <div id="year-slider-ui" class="mt-4"></div>
+                    <div id="year-label" class="text-center font-medium text-gray-700 mt-2"></div>
+                </div>
+            </div>
+        </aside>
+        
+        <!-- Overlay for mobile -->
+        <div id="sidebar-overlay" class="fixed inset-0 bg-black opacity-50 z-20 hidden lg:hidden"></div>
+
+        <!-- Main Content -->
+        <main class="flex-1 p-4 sm:p-6 lg:p-10">
+            <header class="flex items-center justify-between mb-8">
+                <div>
+                    <h1 class="text-3xl font-bold text-gray-900">Dashboard de Centros de Costo</h1>
+                    <p class="text-gray-500 mt-1">Análisis interactivo de gastos por centro de costo.</p>
+                </div>
+                 <!-- Mobile Menu Button -->
+                <button id="menu-button" class="lg:hidden p-2 rounded-md text-gray-500 hover:text-gray-900 hover:bg-gray-100">
+                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+                </button>
+            </header>
+
+            <div id="upload-section" class="card p-6 mb-8">
+                <label for="file-uploader" class="block text-lg font-medium text-gray-700 mb-3">Sube tu archivo Excel</label>
+                <div class="flex items-center space-x-4">
+                    <input type="file" id="file-uploader" class="hidden" accept=".xls,.xlsx">
+                    <label for="file-uploader" class="cursor-pointer bg-blue-500 text-white font-semibold py-2 px-4 rounded-lg hover:bg-blue-600 transition-colors">
+                        Seleccionar Archivo
+                    </label>
+                    <span id="file-name" class="text-gray-500">Ningún archivo seleccionado</span>
+                </div>
+                <div id="loader" class="hidden mt-4 flex items-center gap-4">
+                    <div class="loader"></div>
+                    <span class="text-gray-600">Procesando archivo, por favor espera...</span>
+                </div>
+            </div>
+            
+            <div id="dashboard-content" class="hidden">
+                 <!-- KPIs -->
+                <div id="kpi-container" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                    <!-- KPI cards will be generated by JS -->
+                </div>
+
+                <!-- Trend Chart -->
+                <div class="card mb-8">
+                    <div id="trend-chart" style="min-height: 420px;"></div>
+                </div>
+
+                <!-- Top Tables -->
+                <div class="grid grid-cols-1 xl:grid-cols-2 gap-8 mb-8">
+                    <div class="card">
+                        <h3 class="text-xl font-semibold mb-4 text-gray-800">Top 10 Proveedores</h3>
+                        <div class="overflow-x-auto">
+                            <table id="top-prov-table" class="w-full text-sm text-left text-gray-500"></table>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <h3 class="text-xl font-semibold mb-4 text-gray-800">Top 10 Centros de Costo</h3>
+                         <div class="overflow-x-auto">
+                            <table id="top-centros-table" class="w-full text-sm text-left text-gray-500"></table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Variance Table -->
+                <div class="card mb-8">
+                    <h3 class="text-xl font-semibold mb-4 text-gray-800">Análisis de Variación Mensual</h3>
+                    <div class="overflow-x-auto">
+                        <table id="variance-table" class="w-full text-sm text-left text-gray-500"></table>
+                    </div>
+                </div>
+
+                <!-- Insights -->
+                <div class="card">
+                    <h3 class="text-xl font-semibold mb-4 text-gray-800">Insights Automáticos</h3>
+                    <ul id="insights-list" class="list-disc list-inside space-y-3 text-gray-700">
+                        <li>Sube un archivo para generar insights.</li>
+                    </ul>
+                </div>
+            </div>
+
+             <div id="placeholder" class="text-center py-16 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
+                <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                  <path vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+                </svg>
+                <h3 class="mt-2 text-sm font-medium text-gray-900">Sube tu Excel para ver el Dashboard</h3>
+                <p class="mt-1 text-sm text-gray-500">Los datos se procesarán localmente en tu navegador.</p>
+             </div>
+             
+             <div id="error-message" class="hidden mt-6 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">
+                <strong class="font-bold">Error: </strong>
+                <span class="block sm:inline" id="error-text"></span>
+            </div>
+
+        </main>
+    </div>
+
+<script>
+let fullData = [];
+let yearRange = { min: 2020, max: 2025 };
+
+// --- ICONS ---
+const ICONS = {
+    total: `<svg class="w-8 h-8 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v.01M12 6v-1m0-1V4m0 2.01M12 18v-1m0-1v-1m0-1V9m0 6c-1.11 0-2.08-.402-2.599-1M12 18c-3.314 0-6-2.686-6-6s2.686-6 6-6 6 2.686 6 6-2.686 6-6 6z"></path></svg>`,
+    variation: `<svg class="w-8 h-8 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>`,
+    ticket: `<svg class="w-8 h-8 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 9a2 2 0 100-4 2 2 0 000 4zm0 0v2m0 0v2m0 0h2m-2 0h-2m2-4h2m-2-4h-2m-2 8a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>`,
+    top_provider: `<svg class="w-8 h-8 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>`,
+};
+
+// --- UTILITY FUNCTIONS ---
+const formatCurrency = (value) => value.toLocaleString('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 });
+const formatPercent = (value) => `${(value * 100).toFixed(1)}%`;
+
+// --- DATA LOADING AND PARSING ---
+async function handleFile(file) {
+    document.getElementById('loader').classList.remove('hidden');
+    document.getElementById('dashboard-content').classList.add('hidden');
+    document.getElementById('placeholder').classList.add('hidden');
+    document.getElementById('error-message').classList.add('hidden');
+
+    try {
+        const data = await file.arrayBuffer();
+        const workbook = XLSX.read(data);
+        
+        const needed = ["centro", "anio", "mes", "cta", "descripcion", "nit", "nombre", "valor"];
+        let df = null;
+
+        for (const sheetName of workbook.SheetNames) {
+            const worksheet = workbook.Sheets[sheetName];
+            let sheetData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+            
+            if (sheetData.length === 0) continue;
+
+            let headerRowIndex = findHeaderRow(sheetData);
+            if (headerRowIndex !== -1) {
+                let headers = sheetData[headerRowIndex].map(h => String(h || ''));
+                let jsonData = XLSX.utils.sheet_to_json(worksheet, { header: headers, range: headerRowIndex });
+                
+                let processedData = processData(jsonData);
+                if (processedData.length > 0) {
+                    const missing = needed.filter(c => !Object.keys(processedData[0] || {}).includes(c));
+                    if (missing.length === 0) {
+                        df = processedData;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (!df) {
+            throw new Error("No se encontró una hoja con las columnas requeridas (centro, anio, mes, cta, etc.).");
+        }
+        
+        fullData = df;
+        setupFilters();
+        renderDashboard();
+        document.getElementById('dashboard-content').classList.remove('hidden');
+
+    } catch (e) {
+        console.error(e);
+        document.getElementById('error-text').textContent = e.message;
+        document.getElementById('error-message').classList.remove('hidden');
+        document.getElementById('placeholder').classList.remove('hidden');
+    } finally {
+        document.getElementById('loader').classList.add('hidden');
+    }
+}
+
+function findHeaderRow(sheetData) {
+    const expectedAliases = {
+        "centro": ["centro", "centro de costo"], "anio": ["anio", "ano", "año"], "mes": ["mes"],
+        "cta": ["cta", "cuenta", "cuenta contable"], "descripcion": ["descripcion", "descripción"], "nit": ["nit"],
+        "nombre": ["nombre", "proveedor"], "valor": ["valor", "total", "vlr", "monto", "importe"],
+    };
+    
+    let bestMatch = { index: -1, score: 0 };
+
+    for (let i = 0; i < Math.min(20, sheetData.length); i++) {
+        let row = sheetData[i].map(h => String(h || '').trim().toLowerCase());
+        let score = 0;
+        Object.values(expectedAliases).forEach(aliases => {
+            if (row.some(cell => aliases.includes(cell))) score++;
+        });
+        if (score > bestMatch.score) bestMatch = { index: i, score: score };
+    }
+
+    return bestMatch.score >= 4 ? bestMatch.index : -1;
+}
+
+function processData(jsonData) {
+    const colMap = {
+        "anio": ["anio", "ano", "año"], "mes": ["mes"], "cta": ["cta", "cuenta", "cuenta_contable"],
+        "ccunix": ["ccunix"], "rccunix": ["rccunix"], "descripcion": ["descripcion", "descripci_on"], "nit": ["nit"],
+        "nombre": ["nombre", "proveedor"], "valor": ["valor", "vlr", "total"], "centro": ["centro", "centro_de_costo"],
+        "codccp": ["codccp"]
+    };
+
+    const reverseMap = {};
+    for (const key in colMap) {
+        colMap[key].forEach(alias => {
+            reverseMap[alias.replace(/[^a-z0-9]+/g, "_")] = key;
+            reverseMap[alias] = key;
+        });
+    }
+    
+    return jsonData.map(row => {
+        const newRow = {};
+        for (const key in row) {
+            const normalizedKey = key.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_");
+            if (reverseMap[normalizedKey]) {
+                newRow[reverseMap[normalizedKey]] = row[key];
+            } else {
+                 newRow[normalizedKey] = row[key];
+            }
+        }
+        
+        newRow.anio = parseInt(newRow.anio, 10);
+        newRow.mes = parseInt(newRow.mes, 10);
+        newRow.valor = parseFloat(newRow.valor);
+        
+        if (newRow.anio && newRow.mes) {
+            newRow.fecha = new Date(newRow.anio, newRow.mes - 1, 1);
+        }
+        
+        return newRow;
+    }).filter(row => row.anio && row.mes && !isNaN(row.valor));
+}
+
+// --- FILTERING LOGIC ---
+function setupFilters() {
+    const filters = {
+        centro: [...new Set(fullData.map(d => d.centro).filter(Boolean))].sort(),
+        cta: [...new Set(fullData.map(d => d.cta).filter(Boolean))].sort(),
+        desc: [...new Set(fullData.map(d => d.descripcion).filter(Boolean))].sort(),
+        prov: [...new Set(fullData.map(d => d.nombre).filter(Boolean))].sort()
+    };
+    
+    let lastSelections = {};
+
+    for (const key in filters) {
+        const select = document.getElementById(`filter-${key}`);
+        select.innerHTML = '<option value="Todos" selected>Todos</option>';
+        filters[key].forEach(opt => {
+            const option = document.createElement('option');
+            option.value = opt;
+            option.textContent = opt;
+            select.appendChild(option);
+        });
+
+        lastSelections[key] = ['Todos'];
+
+        select.addEventListener('change', () => {
+            let currentSelection = Array.from(select.selectedOptions).map(o => o.value);
+            const previousSelection = lastSelections[key];
+
+            if (!currentSelection.length) {
+                select.value = 'Todos';
+            } else if (currentSelection.length > 1 && currentSelection.includes('Todos')) {
+                if (previousSelection.includes('Todos')) {
+                    select.value = currentSelection.filter(o => o !== 'Todos');
+                } else {
+                    select.value = 'Todos';
+                }
+            }
+            
+            lastSelections[key] = Array.from(select.selectedOptions).map(o => o.value);
+            renderDashboard();
+        });
+    }
+
+    // Year Slider
+    const years = [...new Set(fullData.map(d => d.anio))];
+    yearRange.min = Math.min(...years);
+    yearRange.max = Math.max(...years);
+
+    const sliderContainer = document.getElementById('year-slider-ui');
+    const yearLabel = document.getElementById('year-label');
+    sliderContainer.innerHTML = '';
+
+    if (yearRange.min === yearRange.max) {
+        sliderContainer.textContent = `Año único: ${yearRange.min}`;
+        yearLabel.textContent = '';
+    } else {
+        sliderContainer.innerHTML = `
+            <div class="relative h-8">
+                <input type="range" min="${yearRange.min}" max="${yearRange.max}" value="${yearRange.min}" id="year-slider-min" class="absolute w-full">
+                <input type="range" min="${yearRange.min}" max="${yearRange.max}" value="${yearRange.max}" id="year-slider-max" class="absolute w-full">
+            </div>
+        `;
+        
+        const sliderMin = document.getElementById('year-slider-min');
+        const sliderMax = document.getElementById('year-slider-max');
+
+        const updateYearLabel = () => {
+            let minVal = parseInt(sliderMin.value);
+            let maxVal = parseInt(sliderMax.value);
+            if (minVal > maxVal) {
+                [sliderMin.value, sliderMax.value] = [sliderMax.value, sliderMin.value];
+            }
+            yearLabel.textContent = `${sliderMin.value} - ${sliderMax.value}`;
+            renderDashboard();
+        };
+
+        sliderMin.addEventListener('input', updateYearLabel);
+        sliderMax.addEventListener('input', updateYearLabel);
+        updateYearLabel();
+    }
+}
+
+function getFilteredData() {
+    const getSelection = (id) => Array.from(document.getElementById(id).selectedOptions).map(opt => opt.value);
+    
+    const sel_centros = getSelection('filter-centro');
+    const sel_cta = getSelection('filter-cta');
+    const sel_desc = getSelection('filter-desc');
+    const sel_prov = getSelection('filter-prov');
+
+    let minYear, maxYear;
+    if (document.getElementById('year-slider-min')) {
+        minYear = parseInt(document.getElementById('year-slider-min').value);
+        maxYear = parseInt(document.getElementById('year-slider-max').value);
+    } else {
+        minYear = yearRange.min;
+        maxYear = yearRange.max;
+    }
+    
+    return fullData.filter(d => {
+        const inCentro = sel_centros.includes('Todos') || sel_centros.includes(d.centro);
+        const inCta = sel_cta.includes('Todos') || sel_cta.includes(d.cta);
+        const inDesc = sel_desc.includes('Todos') || sel_desc.includes(d.descripcion);
+        const inProv = sel_prov.includes('Todos') || sel_prov.includes(d.nombre);
+        const inYear = d.anio >= minYear && d.anio <= maxYear;
+        return inCentro && inCta && inDesc && inProv && inYear;
+    });
+}
+
+// --- DASHBOARD RENDERING ---
+function renderDashboard() {
+    const dff = getFilteredData();
+
+    if (dff.length === 0) {
+        document.getElementById('dashboard-content').classList.add('hidden');
+        document.getElementById('error-text').textContent = "No se encontraron datos con los filtros seleccionados.";
+        document.getElementById('error-message').classList.remove('hidden');
+        return;
+    } else {
+         document.getElementById('error-message').classList.add('hidden');
+         document.getElementById('dashboard-content').classList.remove('hidden');
+    }
+
+    renderKPIs(dff);
+    renderTrendChart(dff);
+    renderTopTables(dff);
+    renderVarianceTable(dff);
+    renderInsights(dff);
+}
+
+function renderKPIs(df) {
+    const kpiContainer = document.getElementById('kpi-container');
+    kpiContainer.innerHTML = '';
+
+    const total = df.reduce((sum, d) => sum + d.valor, 0);
+
+    const monthly = df.reduce((acc, d) => {
+        const dateStr = d.fecha.toISOString().slice(0, 7);
+        acc[dateStr] = (acc[dateStr] || 0) + d.valor;
+        return acc;
+    }, {});
+    const sortedMonths = Object.entries(monthly).sort((a, b) => new Date(a[0]) - new Date(b[0]));
+    
+    let var_pct = NaN;
+    if (sortedMonths.length >= 2) {
+        const last = sortedMonths[sortedMonths.length - 1][1];
+        const prev = sortedMonths[sortedMonths.length - 2][1];
+        if (prev !== 0) var_pct = (last - prev) / prev;
+    }
+
+    const provData = df.reduce((acc, d) => {
+        // Use a robust separator to avoid issues with hyphens in names.
+        const key = `${d.nit || 'N/A'}|||${d.nombre || 'N/A'}`;
+        if (!acc[key]) acc[key] = { total: 0, count: 0 };
+        acc[key].total += d.valor;
+        acc[key].count++;
+        return acc;
+    }, {});
+    const avgTickets = Object.values(provData).map(p => p.total / p.count);
+    const ticket = avgTickets.length > 0 ? avgTickets.reduce((s, v) => s + v, 0) / avgTickets.length : NaN;
+
+    const topProv = Object.entries(provData).sort((a, b) => b[1].total - a[1].total)[0];
+
+    const kpis = [
+        { id: 'total', label: 'Gasto Total', value: formatCurrency(total), icon: ICONS.total },
+        { id: 'var', label: 'Variación Mensual', value: isNaN(var_pct) ? 'N/A' : formatPercent(var_pct), icon: ICONS.variation },
+        { id: 'ticket', label: 'Ticket Promedio', value: isNaN(ticket) ? 'N/A' : formatCurrency(ticket), icon: ICONS.ticket },
+        { id: 'top_prov', label: 'Proveedor Top', value: topProv ? topProv[0].split('|||')[1] : 'N/A', delta: topProv ? formatCurrency(topProv[1].total) : '', icon: ICONS.top_provider },
+    ];
+
+    kpis.forEach(kpi => {
+        const card = document.createElement('div');
+        card.className = 'card p-4 flex items-center';
+        card.innerHTML = `
+            <div class="p-3 bg-gray-100 rounded-full mr-4">${kpi.icon}</div>
+            <div>
+                <p class="text-sm font-medium text-gray-500">${kpi.label}</p>
+                <p class="text-2xl font-semibold text-gray-900 truncate">${kpi.value}</p>
+                ${kpi.delta ? `<p class="text-sm text-gray-500">${kpi.delta}</p>` : ''}
+            </div>
+        `;
+        kpiContainer.appendChild(card);
+    });
+}
+
+function renderTrendChart(df) {
+    const monthly = df.reduce((acc, d) => {
+        const dateStr = d.fecha.toISOString().slice(0, 7) + '-01';
+        acc[dateStr] = (acc[dateStr] || 0) + d.valor;
+        return acc;
+    }, {});
+    const sorted = Object.entries(monthly).sort((a, b) => new Date(a[0]) - new Date(b[0]));
+
+    const dates = sorted.map(d => d[0]);
+    const values = sorted.map(d => d[1]);
+
+    const rollingMean = [];
+    for (let i = 0; i < values.length; i++) {
+        const window = values.slice(Math.max(0, i - 2), i + 1);
+        rollingMean.push(window.reduce((s, v) => s + v, 0) / window.length);
+    }
+
+    const trace1 = { x: dates, y: values, type: 'bar', name: 'Gasto mensual', marker: { color: 'var(--accent-color)' } };
+    const trace2 = { x: dates, y: rollingMean, type: 'scatter', mode: 'lines+markers', name: 'Tendencia (PM 3M)', line: { color: '#f59e0b', width: 3 } };
+
+    const layout = {
+        title: { text: 'Evolución del Gasto Mensual', font: { size: 20, color: 'var(--text-primary)' } },
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: 'rgba(0,0,0,0)',
+        xaxis: { title: 'Mes', gridcolor: 'var(--border-color)' },
+        yaxis: { title: 'COP', tickprefix: '$', separatethousands: true, gridcolor: 'var(--border-color)' },
+        legend: { orientation: 'h', yanchor: 'bottom', y: 1.02, xanchor: 'right', x: 1 },
+        bargap: 0.2,
+        height: 420,
+        margin: { l: 80, r: 20, t: 80, b: 50 },
+        font: { family: 'Inter, sans-serif', color: 'var(--text-secondary)'}
+    };
+
+    Plotly.newPlot('trend-chart', [trace1, trace2], layout, {responsive: true, displaylogo: false});
+}
+
+function renderTopTables(df) {
+    const createTopTable = (data, containerId, keyField) => {
+        const grouped = data.reduce((acc, d) => {
+            const key = d[keyField] || 'N/A';
+            acc[key] = (acc[key] || 0) + d.valor;
+            return acc;
+        }, {});
+        
+        const sorted = Object.entries(grouped).sort((a, b) => b[1] - a[1]).slice(0, 10);
+        
+        const table = document.getElementById(containerId);
+        table.innerHTML = `
+            <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                <tr>
+                    <th scope="col" class="px-6 py-3">${keyField.charAt(0).toUpperCase() + keyField.slice(1)}</th>
+                    <th scope="col" class="px-6 py-3 text-right">Gasto Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${sorted.map(row => `
+                    <tr class="bg-white border-b hover:bg-gray-50">
+                        <td class="px-6 py-4 font-medium text-gray-900 whitespace-nowrap">${row[0]}</td>
+                        <td class="px-6 py-4 text-right">${formatCurrency(row[1])}</td>
+                    </tr>
+                `).join('')}
+            </tbody>
+        `;
+    };
+    
+    createTopTable(df, 'top-prov-table', 'nombre');
+    createTopTable(df, 'top-centros-table', 'centro');
+}
+
+function renderVarianceTable(df) {
+    const monthly = df.reduce((acc, d) => {
+        const key = `${d.anio}-${String(d.mes).padStart(2, '0')}`;
+        acc[key] = (acc[key] || 0) + d.valor;
+        return acc;
+    }, {});
+    const sorted = Object.entries(monthly).sort((a,b) => a[0].localeCompare(b[0]));
+
+    let tableData = [];
+    for (let i = 0; i < sorted.length; i++) {
+        const [mes, valor] = sorted[i];
+        let var_pct = NaN;
+        let var_flag = '';
+        if (i > 0) {
+            const valor_prev = sorted[i-1][1];
+            if (valor_prev !== 0) var_pct = (valor - valor_prev) / valor_prev;
+            if (Math.abs(var_pct) >= 0.25) var_flag = 'ALERTA';
+        }
+        tableData.push({ Mes: mes, valor, var_pct, var_flag });
+    }
+
+    const table = document.getElementById('variance-table');
+    table.innerHTML = `
+        <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+            <tr>
+                <th scope="col" class="px-6 py-3">Mes</th>
+                <th scope="col" class="px-6 py-3 text-right">Gasto Total</th>
+                <th scope="col" class="px-6 py-3 text-right">Variación vs Mes Ant.</th>
+                <th scope="col" class="px-6 py-3 text-center">Estado</th>
+            </tr>
+        </thead>
+        <tbody>
+            ${tableData.map(row => `
+                <tr class="bg-white border-b hover:bg-gray-50">
+                    <td class="px-6 py-4 font-medium">${row.Mes}</td>
+                    <td class="px-6 py-4 text-right">${formatCurrency(row.valor)}</td>
+                    <td class="px-6 py-4 text-right font-medium ${isNaN(row.var_pct) ? '' : (row.var_pct >= 0 ? 'text-green-600' : 'text-red-600')}">
+                        ${isNaN(row.var_pct) ? 'N/A' : formatPercent(row.var_pct)}
+                    </td>
+                    <td class="px-6 py-4 text-center">
+                        ${row.var_flag === 'ALERTA' ? `<span class="px-2 py-1 font-semibold leading-tight text-red-700 bg-red-100 rounded-full">Alerta</span>` : `<span class="px-2 py-1 font-semibold leading-tight text-green-700 bg-green-100 rounded-full">Normal</span>`}
+                    </td>
+                </tr>
+            `).join('')}
+        </tbody>
+    `;
+}
+
+function renderInsights(df) {
+    const notes = [];
+    const negSum = df.filter(d => d.valor < 0).reduce((s, d) => s + d.valor, 0);
+    if (negSum < 0) {
+        notes.push(`Se detectan <strong>ajustes o notas crédito</strong> por un total de ${formatCurrency(negSum)}. Se recomienda revisar los soportes contables.`);
+    }
+
+    const provConc = df.reduce((acc, d) => {
+        const key = d.nombre || 'N/A';
+        acc[key] = (acc[key] || 0) + d.valor;
+        return acc;
+    }, {});
+    const sortedProv = Object.entries(provConc).sort((a, b) => b[1] - a[1]);
+    const totalSpend = sortedProv.reduce((s, v) => s + v[1], 0);
+
+    if (sortedProv.length >= 3 && totalSpend > 0) {
+        const top3Providers = sortedProv.slice(0, 3);
+        const top3Spend = top3Providers.reduce((s, v) => s + v[1], 0);
+        const top3Names = top3Providers.map(p => p[0]).join(', ');
+        notes.push(`El <strong>${formatPercent(top3Spend / totalSpend)}</strong> del gasto se concentra en los 3 proveedores principales (${top3Names}). Existe una oportunidad para negociar tarifas o diversificar.`);
+    }
+    
+    const monthly = df.reduce((acc, d) => {
+        const dateStr = d.fecha.toISOString().slice(0, 7);
+        acc[dateStr] = (acc[dateStr] || 0) + d.valor;
+        return acc;
+    }, {});
+    const sortedMonths = Object.entries(monthly).sort((a, b) => a[1] - b[1]);
+
+    if(sortedMonths.length >= 3) {
+        notes.push(`El mes con el mayor pico de gasto fue <strong>${sortedMonths[sortedMonths.length - 1][0]}</strong>. Analizar si corresponde a renovaciones de contratos o compras estacionales.`);
+    }
+
+    if (notes.length === 0) {
+        notes.push("La tendencia del gasto se muestra estable y sin eventos atípicos relevantes para el período y filtros seleccionados.");
+    }
+
+    document.getElementById('insights-list').innerHTML = notes.map(n => `<li>${n}</li>`).join('');
+}
+
+
+// --- INITIAL SETUP & EVENT LISTENERS ---
+document.getElementById('file-uploader').addEventListener('change', (event) => {
+    const file = event.target.files[0];
+    if (file) {
+        document.getElementById('file-name').textContent = file.name;
+        handleFile(file);
+    }
+});
+
+const menuButton = document.getElementById('menu-button');
+const sidebar = document.getElementById('sidebar');
+const overlay = document.getElementById('sidebar-overlay');
+
+menuButton.addEventListener('click', () => {
+    sidebar.classList.toggle('-translate-x-full');
+    overlay.classList.toggle('hidden');
+});
+
+overlay.addEventListener('click', () => {
+    sidebar.classList.add('-translate-x-full');
+    overlay.classList.add('hidden');
+});
+
+</script>
+
+<script>
+const desktopSidebarToggle = document.getElementById('desktop-sidebar-toggle');
+////const sidebar = document.getElementById('sidebar');
+const icon = document.getElementById('desktop-sidebar-toggle-icon');
+
+if (desktopSidebarToggle) {
+    desktopSidebarToggle.addEventListener('click', () => {
+        if (window.innerWidth < 1024) {
+            return;
+        }
+        sidebar.classList.toggle('hidden');
+        if (sidebar.classList.contains('hidden')) {
+            desktopSidebarToggle.style.left = '0.5rem';
+            icon.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>`;
+        } else {
+            desktopSidebarToggle.style.left = '20rem';
+            icon.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>`;
+        }
+    });
+}
+</script>
+
+</body>
+</html>
